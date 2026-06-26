@@ -14,7 +14,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -22,10 +21,28 @@
   <div style="font-size: 48px; margin-bottom: 16px;">🏋️</div>
   <h1 style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">Training</h1>
   <p style="color: var(--muted); margin-bottom: 32px;">Sign in to sync your workouts</p>
-  <button class="btn btn-primary" onclick="signInWithGoogle()" style="width: 100%; max-width: 280px; display: flex; align-items: center; justify-content: center; gap: 10px;">
+  
+  <button class="btn btn-primary" onclick="signInWithGoogle()" style="width: 100%; max-width: 280px; display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px;">
     <span style="background: white; border-radius: 50%; padding: 4px; display: flex; align-items: center; justify-content: center;"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" width="16" height="16" alt="Google"></span>
     Sign in with Google
   </button>
+  
+  <button class="btn btn-ghost" onclick="continueAsGuest()" style="width: 100%; max-width: 280px;">
+    Continue as Guest
+  </button>
+  <div style="font-size: 11px; color: var(--muted2); margin-top: 12px;">Guest mode saves locally to this device only.</div>
+</div>
+
+<div id="weigh-in-overlay" style="display:none;">
+  <div class="weigh-in-box">
+    <h2 style="font-size: 18px; margin-bottom: 8px;">Weekly Weigh-in ⚖️</h2>
+    <p style="font-size: 13px; color: var(--muted); margin-bottom: 16px;">It's been a while since you logged your weight. Want to track it now?</p>
+    <input type="number" inputmode="decimal" id="quick-bw" class="field-input" placeholder="Body Weight (lbs)" style="margin-bottom: 16px;">
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-ghost" style="flex: 1;" onclick="skipWeighIn()">Skip</button>
+      <button class="btn btn-primary" style="flex: 1;" onclick="submitWeighIn()">Save</button>
+    </div>
+  </div>
 </div>
 
 <div id="app" style="display: none;">
@@ -108,33 +125,19 @@
   <div class="screen" id="screen-settings">
     <div class="top-bar"><div><h1>Settings</h1><p>Account & data</p></div><button class="icon-btn" onclick="showScreen('home')">✕</button></div>
     
-    <div class="sec-label">Cloud Sync</div>
+    <div class="sec-label">Account</div>
     <div class="settings-block">
       <div class="settings-row">
-        <div><div style="font-size:15px;font-weight:600">Account</div><div style="font-size:12px;color:var(--blue);margin-top:4px" id="user-email">Syncing...</div></div>
+        <div><div style="font-size:15px;font-weight:600">Status</div><div style="font-size:12px;color:var(--blue);margin-top:4px" id="user-email">Syncing...</div></div>
         <button class="btn btn-ghost btn-sm" onclick="signOutUser()">Sign Out</button>
       </div>
     </div>
-
-    <div class="sec-label">Backup & Restore</div>
-    <div class="settings-block">
-      <div class="settings-row"><div><div style="font-size:15px;font-weight:600">Export Backup</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Download all data as Excel</div></div></div>
-      <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="exportExcel()">📥 Export Excel Backup</button>
-    </div>
-    <div class="settings-block">
-      <div class="settings-row"><div><div style="font-size:15px;font-weight:600">Restore Backup</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Upload a previously exported Excel file</div></div></div>
-      <label class="btn btn-ghost" style="width:100%;margin-top:12px;cursor:pointer;display:flex;align-items:center;justify-content:center">
-        ⬆️ Import Excel Backup
-        <input type="file" accept=".xlsx,.xls" style="display:none" onchange="importExcel(event)">
-      </label>
-    </div>
-    <div style="padding:0 16px 16px;font-size:13px;color:var(--muted);line-height:1.6;font-weight:500">Tip: Data is synced to the cloud automatically, but you can export Excel files for your own records.</div>
     
     <div class="sec-label" style="color:var(--red)">Danger Zone</div>
     <div class="settings-block">
       <div class="settings-row">
-        <div><div style="font-size:15px;font-weight:600">Clear All Data</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Delete everything from cloud</div></div>
-        <button class="btn btn-red btn-sm" onclick="clearAllData()">Clear</button>
+        <div><div style="font-size:15px;font-weight:600">Delete Account</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Permanently wipe all data</div></div>
+        <button class="btn btn-red btn-sm" onclick="deleteAccount()">Delete</button>
       </div>
     </div>
   </div>

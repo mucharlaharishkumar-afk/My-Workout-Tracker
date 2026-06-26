@@ -14,9 +14,12 @@ const auth = firebase.auth();
 const firestore = firebase.firestore();
 
 let currentUser = null;
+let isGuest = false;
 
-// ══════════ 2. AUTHENTICATION LOGIC ══════════
+// ══════════ 2. AUTHENTICATION & GUEST LOGIC ══════════
 auth.onAuthStateChanged(async (user) => {
+  if (isGuest) return; // Ignore auth state changes if manually chose Guest
+
   const loginScreen = document.getElementById('login-screen');
   const appContainer = document.getElementById('app');
   
@@ -25,7 +28,6 @@ auth.onAuthStateChanged(async (user) => {
     loginScreen.style.display = 'none';
     appContainer.style.display = 'block';
     
-    // Show email in settings
     const emailEl = document.getElementById('user-email');
     if (emailEl) emailEl.textContent = user.email;
 
@@ -40,24 +42,59 @@ auth.onAuthStateChanged(async (user) => {
 
 function signInWithGoogle() {
   const provider = new firebase.auth.GoogleAuthProvider();
+  // Using Popup to bypass mobile storage-partitioning block
   auth.signInWithPopup(provider).catch(err => alert("Login error: " + err.message));
 }
 
-function signOutUser() {
-  auth.signOut();
+async function continueAsGuest() {
+  isGuest = true;
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  
+  const emailEl = document.getElementById('user-email');
+  if (emailEl) emailEl.textContent = "Guest (Local Storage Only)";
+  
+  await loadDB();
+  renderHome();
 }
 
+function signOutUser() {
+  if (isGuest) {
+    location.reload(); // Quick reset for guests
+  } else {
+    auth.signOut();
+  }
+}
+
+async function deleteAccount() {
+  confirm2("Permanently delete your account and all data from the cloud?", "Delete Account", async () => {
+    if (isGuest) {
+      localStorage.removeItem('trn_v4_guest');
+      location.reload();
+      return;
+    }
+    try {
+      // 1. Delete data from database
+      await firestore.collection('users').doc(currentUser.uid).delete();
+      // 2. Delete user auth profile
+      await currentUser.delete();
+      location.reload();
+    } catch(e) {
+      alert("Error deleting account. You may need to sign out and sign back in first to verify your identity.");
+    }
+  }, "Cancel");
+}
 
 // ══════════ 3. DEFAULT PLAN ══════════
 const DEFAULT_GROUPS = [
-  {id:'A',label:'Upper A — Width',color:'#0A84FF',cardio:true,cardioOpt:false,exercises:[
+  {id:'A',label:'Upper A — Width',color:'#0A84FF',cardio:true,exercises:[
     {id:'lat_pulldown',name:'Lat Pulldown',sets:3,range:'8–12',starred:false},
     {id:'seated_row',name:'Seated Row',sets:3,range:'8–12',starred:false},
     {id:'shoulder_press_a',name:'Shoulder Press',sets:3,range:'8–12',starred:false},
     {id:'lateral_raises_a',name:'Lateral Raises',sets:3,range:'12–20',starred:true},
     {id:'bicep_curl',name:'Bicep Curl',sets:3,range:'10–12',starred:false},
   ]},
-  {id:'B',label:'Upper B — Chest',color:'#FF453A',cardio:true,cardioOpt:false,exercises:[
+  {id:'B',label:'Upper B — Chest',color:'#FF453A',cardio:true,exercises:[
     {id:'chest_press',name:'Chest Press',sets:3,range:'8–12',starred:false},
     {id:'incline_chest',name:'Incline Chest Press',sets:3,range:'8–12',starred:false},
     {id:'pec_deck',name:'Pec Deck',sets:3,range:'10–12',starred:false},
@@ -65,59 +102,95 @@ const DEFAULT_GROUPS = [
     {id:'lateral_raises_b',name:'Lateral Raises',sets:3,range:'12–20',starred:true},
     {id:'triceps',name:'Triceps Pushdown',sets:3,range:'10–12',starred:false},
   ]},
-  {id:'L',label:'Lower — Maintenance',color:'#30D158',cardio:true,cardioOpt:true,exercises:[
+  {id:'L',label:'Lower — Maintenance',color:'#30D158',cardio:true,exercises:[
     {id:'leg_press',name:'Leg Press',sets:3,range:'10–12',starred:false},
     {id:'leg_curl',name:'Leg Curl',sets:3,range:'10–12',starred:false},
     {id:'leg_extension',name:'Leg Extension',sets:3,range:'10–12',starred:false},
     {id:'calf_raises',name:'Calf Raises',sets:3,range:'12–15',starred:false},
   ]},
-  {id:'C',label:'Cardio Only',color:'#FF9F0A',cardio:true,cardioOpt:false,exercises:[]},
+  {id:'C',label:'Cardio Only',color:'#FF9F0A',cardio:true,exercises:[]},
 ];
 const COLORS = ['#0A84FF','#FF453A','#30D158','#FF9F0A','#BF5AF2','#FF375F','#5E5CE6','#FFD60A','#64D2FF','#32ADE6'];
 
-// ══════════ 4. CLOUD DATABASE ══════════
+// ══════════ 4. CLOUD / LOCAL DATABASE ══════════
 let db = {sessions:[], measurements:[], groups: []};
 
 async function loadDB(){
-  if (!currentUser) return;
-  try {
-    const docRef = firestore.collection('users').doc(currentUser.uid);
-    const docSnap = await docRef.get();
-    
-    if (docSnap.exists) {
-      db = docSnap.data();
-      // Ensure fallbacks if data is missing
-      if(!db.groups || db.groups.length === 0) db.groups = JSON.parse(JSON.stringify(DEFAULT_GROUPS));
-      if(!db.measurements) db.measurements = [];
-      if(!db.sessions) db.sessions = [];
-      // Ensure all exercises have starred field
-      db.groups.forEach(g => g.exercises.forEach(e => { if(e.starred===undefined) e.starred=false; }));
-    } else {
-      // New user, create their first document
-      db = { sessions: [], measurements: [], groups: JSON.parse(JSON.stringify(DEFAULT_GROUPS)) };
-      await saveDB();
+  if (isGuest) {
+    const s = localStorage.getItem('trn_v4_guest');
+    if (s) { db = JSON.parse(s); }
+    else { db = { sessions: [], measurements: [], groups: JSON.parse(JSON.stringify(DEFAULT_GROUPS)) }; }
+  } else if (currentUser) {
+    try {
+      const docRef = firestore.collection('users').doc(currentUser.uid);
+      const docSnap = await docRef.get();
+      if (docSnap.exists) {
+        db = docSnap.data();
+      } else {
+        db = { sessions: [], measurements: [], groups: JSON.parse(JSON.stringify(DEFAULT_GROUPS)) };
+        await saveDB();
+      }
+    } catch(e) {
+      console.error("Failed to load data", e);
+      alert("Could not load cloud data. Check your internet connection.");
     }
-  } catch(e) {
-    console.error("Failed to load data", e);
-    alert("Could not load cloud data. Check your internet connection.");
   }
+
+  // Safety checks
+  if(!db.groups || db.groups.length === 0) db.groups = JSON.parse(JSON.stringify(DEFAULT_GROUPS));
+  if(!db.measurements) db.measurements = [];
+  if(!db.sessions) db.sessions = [];
+  db.groups.forEach(g => g.exercises.forEach(e => { if(e.starred===undefined) e.starred=false; }));
+  
+  checkWeighIn();
 }
 
 async function saveDB(){
-  if (!currentUser) return;
-  try {
-    await firestore.collection('users').doc(currentUser.uid).set(db);
-  } catch(e) {
-    console.error("Failed to save data", e);
-    alert("Could not save to cloud. Check your connection.");
+  if (isGuest) {
+    localStorage.setItem('trn_v4_guest', JSON.stringify(db));
+  } else if (currentUser) {
+    try {
+      await firestore.collection('users').doc(currentUser.uid).set(db);
+    } catch(e) {
+      console.error("Failed to save data", e);
+      alert("Could not save to cloud. Check your connection.");
+    }
   }
 }
 
+// ══════════ 5. WEEKLY WEIGH-IN LOGIC ══════════
+function checkWeighIn() {
+  const overlay = document.getElementById('weigh-in-overlay');
+  if (!db.measurements || db.measurements.length === 0) {
+    overlay.style.display = 'flex';
+    return;
+  }
+  // Check if last weigh-in was > 7 days ago
+  const latest = [...db.measurements].sort((a,b) => b.ts - a.ts)[0];
+  if (Date.now() - latest.ts > 7 * 86400000) {
+    overlay.style.display = 'flex';
+  }
+}
 
-// ══════════ 5. APP LOGIC (Unchanged from before) ══════════
+function skipWeighIn() {
+  document.getElementById('weigh-in-overlay').style.display = 'none';
+}
+
+function submitWeighIn() {
+  const bw = document.getElementById('quick-bw').value;
+  if (!bw) { alert('Enter a weight or tap skip.'); return; }
+  db.measurements.push({ ts: Date.now(), bw: bw, waist: '', chest: '', shoulder: '' });
+  saveDB();
+  document.getElementById('weigh-in-overlay').style.display = 'none';
+  // Refresh UI if we're on the progress screen
+  if(document.getElementById('screen-progress').classList.contains('active')) renderMeasureHistory();
+}
+
+// ══════════ 6. CORE APP LOGIC ══════════
 let activeWk=null, restTimer=null, restEnd=0, wkStartTime=0, wkTimerInterval=null;
 let openExSet = new Set([0]);
 let editingSessionIdx = null, editSessionBuf = null;
+let editGroupBuf = null; // Buffer for when creating/editing groups
 let progTab = 'weight';
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
@@ -125,31 +198,22 @@ function slug(s){ return s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_'); }
 function getGroup(id){ return db.groups.find(g=>g.id===id); }
 
 function fmtDate(ts){
-  const d = new Date(ts);
-  const n = new Date();
-  const dDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const nDay = new Date(n.getFullYear(), n.getMonth(), n.getDate());
-  const diff = Math.round((nDay - dDay) / 86400000);
-  if(diff===0) return 'Today';
-  if(diff===1) return 'Yesterday';
-  if(diff<7) return diff+'d ago';
+  const d = new Date(ts); const n = new Date();
+  const diff = Math.round((new Date(n.getFullYear(), n.getMonth(), n.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+  if(diff===0) return 'Today'; if(diff===1) return 'Yesterday'; if(diff<7) return diff+'d ago';
   return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
 }
 function fmtDateFull(ts){ return new Date(ts).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}); }
 function fmtDur(ms){ const m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000); return m+'m '+(s<10?'0':'')+s+'s'; }
 function getLastExData(exId, beforeTs){
-  let list = [...db.sessions];
-  if(beforeTs) list = list.filter(s=>s.ts<beforeTs);
+  let list = [...db.sessions]; if(beforeTs) list = list.filter(s=>s.ts<beforeTs);
   for(let s of list.sort((a,b)=>b.ts-a.ts)){
     const ex = (s.exercises||[]).find(e=>e.id===exId);
     if(ex && ex.sets && ex.sets.some(st=>st.weight||st.reps)) return ex;
-  }
-  return null;
+  } return null;
 }
 function getPR(exId){
-  let pr=0;
-  db.sessions.forEach(s=>(s.exercises||[]).filter(e=>e.id===exId).forEach(e=>e.sets.forEach(st=>{const w=parseFloat(st.weight)||0;if(w>pr)pr=w;})));
-  return pr;
+  let pr=0; db.sessions.forEach(s=>(s.exercises||[]).filter(e=>e.id===exId).forEach(e=>e.sets.forEach(st=>{const w=parseFloat(st.weight)||0;if(w>pr)pr=w;}))); return pr;
 }
 function sessionVol(s){ return (s.exercises||[]).reduce((a,ex)=>a+ex.sets.reduce((b,st)=>b+(parseFloat(st.weight||0)*parseFloat(st.reps||0)),0),0); }
 function thisWeekCount(){ return db.sessions.filter(s=>Date.now()-s.ts<7*86400000).length; }
@@ -157,35 +221,24 @@ function thisWeekCount(){ return db.sessions.filter(s=>Date.now()-s.ts<7*8640000
 function calcStreak(){
   if(!db.sessions.length) return 0;
   const days = [...new Set(db.sessions.map(s => {
-    const d = new Date(s.ts);
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const d = new Date(s.ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }))].sort().reverse();
   let streak=0, cur=new Date(); cur.setHours(0,0,0,0);
   for(let dd of days){ 
-    const p=dd.split('-'); 
-    const d=new Date(p[0], p[1]-1, p[2]); 
-    const diff=Math.round((cur-d)/86400000); 
+    const p=dd.split('-'); const d=new Date(p[0], p[1]-1, p[2]); const diff=Math.round((cur-d)/86400000); 
     if(diff<=1){ streak++; cur=d; } else break; 
-  }
-  return streak;
+  } return streak;
 }
 function getLastSession(gid){ return [...db.sessions].filter(s=>s.groupId===gid).sort((a,b)=>b.ts-a.ts)[0]||null; }
 function allKnownExercises(){
-  const map={};
-  db.groups.forEach(g=>g.exercises.forEach(e=>{map[e.id]=e.name;}));
-  db.sessions.forEach(s=>(s.exercises||[]).forEach(e=>{if(!map[e.id])map[e.id]=e.name;}));
-  return Object.entries(map).map(([id,name])=>({id,name}));
+  const map={}; db.groups.forEach(g=>g.exercises.forEach(e=>{map[e.id]=e.name;}));
+  db.sessions.forEach(s=>(s.exercises||[]).forEach(e=>{if(!map[e.id])map[e.id]=e.name;})); return Object.entries(map).map(([id,name])=>({id,name}));
 }
 
 function confirm2(msg, yesLabel, onYes, noLabel){
   const ov=document.createElement('div'); ov.id='confirm-overlay';
-  ov.innerHTML=`<div class="confirm-box"><div class="confirm-msg">${msg}</div><div class="confirm-btns">
-    <button class="btn btn-red" id="cy">${yesLabel}</button>
-    <button class="btn btn-ghost" id="cn">${noLabel||'Cancel'}</button>
-  </div></div>`;
-  document.body.appendChild(ov);
-  document.getElementById('cy').onclick=()=>{ov.remove();onYes();};
-  document.getElementById('cn').onclick=()=>ov.remove();
+  ov.innerHTML=`<div class="confirm-box"><div class="confirm-msg">${msg}</div><div class="confirm-btns"><button class="btn btn-red" id="cy">${yesLabel}</button><button class="btn btn-ghost" id="cn">${noLabel||'Cancel'}</button></div></div>`;
+  document.body.appendChild(ov); document.getElementById('cy').onclick=()=>{ov.remove();onYes();}; document.getElementById('cn').onclick=()=>ov.remove();
 }
 
 function showScreen(name){
@@ -194,105 +247,108 @@ function showScreen(name){
   document.getElementById('screen-'+name).classList.add('active');
   const nb=document.getElementById('nav-'+name); if(nb) nb.classList.add('active');
   const fb=document.getElementById('workout-finish-bar'); if(fb) fb.style.display = (name==='workout') ? 'flex' : 'none';
-  if(name==='home') renderHome();
-  if(name==='history') renderHistory();
-  if(name==='progress'){ renderProgressSelect(); renderChart(); }
+  if(name==='home') renderHome(); if(name==='history') renderHistory(); if(name==='progress'){ renderProgressSelect(); renderChart(); }
   window.scrollTo(0,0);
 }
 
 function renderHome(){
   const cards=document.getElementById('wk-cards'); cards.innerHTML='';
   db.groups.forEach(g=>{
-    const last=getLastSession(g.id);
-    const card=document.createElement('div'); card.className='wk-card';
-    card.innerHTML=`<div class="wk-card-dot" style="background:${g.color}"></div>
-      <div class="wk-card-title">${g.label}</div>
-      <div class="wk-card-sub">${g.exercises.length?g.exercises.length+' exercises':'Cardio only'}${g.cardio?(g.cardioOpt?' + opt. cardio':' + cardio'):''}</div>
-      <div class="wk-card-last">${last?'Last: '+fmtDate(last.ts):'No sessions yet'}</div>`;
-    card.onclick=()=>startWorkout(g.id);
-    cards.appendChild(card);
+    const last=getLastSession(g.id); const card=document.createElement('div'); card.className='wk-card';
+    card.innerHTML=`<div class="wk-card-dot" style="background:${g.color}"></div><div class="wk-card-title">${g.label}</div><div class="wk-card-sub">${g.exercises.length?g.exercises.length+' exercises':'Cardio only'}${g.cardio?' + cardio':''}</div><div class="wk-card-last">${last?'Last: '+fmtDate(last.ts):'No sessions yet'}</div>`;
+    card.onclick=()=>startWorkout(g.id); cards.appendChild(card);
   });
-  const tw=thisWeekCount(), streak=calcStreak();
-  document.getElementById('home-sub').textContent = tw>=3 ? `${tw}/3 sessions this week ✓` : `${tw}/3 sessions this week`;
+  const tw=thisWeekCount(), streak=calcStreak(); document.getElementById('home-sub').textContent = tw>=3 ? `${tw}/3 sessions this week ✓` : `${tw}/3 sessions this week`;
   const vol=db.sessions.filter(s=>Date.now()-s.ts<7*86400000).reduce((a,s)=>a+sessionVol(s),0);
-  document.getElementById('stats-strip').innerHTML=`
-    <div class="stat-tile"><div class="stat-tile-val">${tw}</div><div class="stat-tile-lbl">This week</div></div>
-    <div class="stat-tile"><div class="stat-tile-val">${streak}</div><div class="stat-tile-lbl">Day streak</div></div>
-    <div class="stat-tile"><div class="stat-tile-val">${vol>0?Math.round(vol/1000)+'k':'—'}</div><div class="stat-tile-lbl">Weekly vol</div></div>`;
+  document.getElementById('stats-strip').innerHTML=`<div class="stat-tile"><div class="stat-tile-val">${tw}</div><div class="stat-tile-lbl">This week</div></div><div class="stat-tile"><div class="stat-tile-val">${streak}</div><div class="stat-tile-lbl">Day streak</div></div><div class="stat-tile"><div class="stat-tile-val">${vol>0?Math.round(vol/1000)+'k':'—'}</div><div class="stat-tile-lbl">Weekly vol</div></div>`;
 }
 
-function openManagePlan(){
-  const ov=document.createElement('div'); ov.id='manage-overlay';
-  document.body.appendChild(ov);
-  renderManagePlanList();
-}
+// ══════════ PLAN MANAGEMENT (BUFFERED) ══════════
+function openManagePlan(){ const ov=document.createElement('div'); ov.id='manage-overlay'; document.body.appendChild(ov); renderManagePlanList(); }
 function closeManagePlan(){ document.getElementById('manage-overlay')?.remove(); renderHome(); }
 
 function renderManagePlanList(){
   const ov=document.getElementById('manage-overlay'); if(!ov) return;
-  let html=`<div class="overlay-head">
-    <button class="back-btn" onclick="closeManagePlan()">←</button>
-    <div class="overlay-title">Manage Plan</div><div></div>
-  </div>
-  <div class="sec-label">Workout Groups</div>`;
+  let html=`<div class="overlay-head"><button class="back-btn" onclick="closeManagePlan()">←</button><div class="overlay-title">Manage Plan</div><div></div></div><div class="sec-label">Workout Groups</div>`;
   db.groups.forEach((g,gi)=>{
     const starCount = g.exercises.filter(e=>e.starred).length;
-    html+=`<div class="group-row" onclick="openEditGroup('${g.id}')">
-      <div class="group-color-dot" style="background:${g.color}"></div>
-      <div class="group-info"><div class="group-name">${g.label}</div><div class="group-sub">${g.exercises.length} exercises${starCount?' · '+starCount+' ⭐':''}${g.cardio?(g.cardioOpt?' · opt. cardio':' · cardio'):''}</div></div>
-      <div class="group-chevron">›</div>
-    </div>`;
+    html+=`<div class="group-row" onclick="openEditGroup('${g.id}')"><div class="group-color-dot" style="background:${g.color}"></div><div class="group-info"><div class="group-name">${g.label}</div><div class="group-sub">${g.exercises.length} exercises${starCount?' · '+starCount+' ⭐':''}${g.cardio?' · cardio':''}</div></div><div class="group-chevron">›</div></div>`;
   });
   html+=`<div class="add-dashed" onclick="openNewGroupForm()">+ Create New Workout Group</div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-primary" style="width:100%" onclick="closeManagePlan()">Done</button></div>`;
   ov.innerHTML=html;
 }
 
-function openEditGroup(gid){ const ov=document.getElementById('manage-overlay'); if(!ov) return; renderEditGroup(gid); }
-function renderEditGroup(gid){
-  const ov=document.getElementById('manage-overlay'); if(!ov) return;
-  const g=getGroup(gid); if(!g) return;
-  let html=`<div class="overlay-head"><button class="back-btn" onclick="renderManagePlanList()">←</button><div class="overlay-title" style="font-size:18px;flex:1;margin:0 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.label}</div><button class="btn btn-ghost btn-sm" onclick="openEditGroupMeta('${gid}')">✏️ Rename</button></div>
-  <div class="sec-label" style="padding-top:4px">Exercises <span class="sec-action" onclick="openAddExerciseForm('${gid}')">+ Add</span></div>`;
-  if(!g.exercises.length){ html+=`<div style="text-align:center;color:var(--muted);font-size:14px;padding:30px 16px">No exercises yet.</div>`; } else {
-    g.exercises.forEach((ex,ei)=>{ html+=`<div class="edit-ex-row" id="eerow-${ei}"><div class="edit-ex-star" onclick="toggleStar('${gid}',${ei})">${ex.starred?'⭐':'☆'}</div><div class="edit-ex-info"><div class="edit-ex-name">${ex.name}</div><div class="edit-ex-meta">${ex.sets} sets · ${ex.range} reps</div></div><div class="edit-ex-actions"><div class="icon-sm" onclick="openEditExerciseForm('${gid}',${ei})">✏️</div><div class="icon-sm" onclick="removeExerciseFromGroup('${gid}',${ei})" style="color:var(--red)">🗑</div></div></div>`; });
+function openEditGroup(gid){ 
+  const g = getGroup(gid); if(!g) return;
+  editGroupBuf = JSON.parse(JSON.stringify(g)); 
+  renderEditGroup(); 
+}
+
+function renderEditGroup(){
+  const ov=document.getElementById('manage-overlay'); if(!ov || !editGroupBuf) return;
+  const g = editGroupBuf;
+  let html=`<div class="overlay-head"><button class="back-btn" onclick="discardGroupEdits()">←</button><div class="overlay-title" style="font-size:18px;flex:1;margin:0 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.label}</div><button class="btn btn-ghost btn-sm" onclick="openEditGroupMeta()">✏️ Rename</button></div>
+  <div class="sec-label" style="padding-top:4px">Exercises <span class="sec-action" onclick="openAddExerciseForm()">+ Add</span></div>`;
+  if(!g.exercises.length){ html+=`<div style="text-align:center;color:var(--muted);font-size:14px;padding:30px 16px">No exercises yet. Add one above.</div>`; } else {
+    g.exercises.forEach((ex,ei)=>{ html+=`<div class="edit-ex-row" id="eerow-${ei}"><div class="edit-ex-star" onclick="toggleStar(${ei})">${ex.starred?'⭐':'☆'}</div><div class="edit-ex-info"><div class="edit-ex-name">${ex.name}</div><div class="edit-ex-meta">${ex.sets} sets · ${ex.range} reps</div></div><div class="edit-ex-actions"><div class="icon-sm" onclick="openEditExerciseForm(${ei})">✏️</div><div class="icon-sm" onclick="removeExerciseFromGroup(${ei})" style="color:var(--red)">🗑</div></div></div>`; });
   }
-  html+=`<div class="sec-label" style="margin-top:12px">Cardio</div><div class="modal-form"><div class="toggle-wrap" style="margin-bottom:16px"><label class="toggle"><input type="checkbox" ${g.cardio?'checked':''} onchange="toggleGroupProp('${gid}','cardio',this.checked)"><span class="toggle-slider"></span></label><span style="font-size:14px;font-weight:500">Include cardio</span></div><div class="toggle-wrap"><label class="toggle"><input type="checkbox" ${g.cardioOpt?'checked':''} onchange="toggleGroupProp('${gid}','cardioOpt',this.checked)"><span class="toggle-slider"></span></label><span style="font-size:14px;font-weight:500">Optional</span></div></div>
-  <div class="sec-label">Color</div><div class="modal-form"><div class="color-picker">${COLORS.map(c=>`<div class="color-swatch${g.color===c?' selected':''}" style="background:${c}" onclick="setGroupColor('${gid}','${c}')"></div>`).join('')}</div></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-red" onclick="deleteGroup('${gid}')">Delete Group</button></div>`;
+  html+=`<div class="sec-label" style="margin-top:12px">Cardio</div><div class="modal-form"><div class="toggle-wrap" style="margin-bottom:8px"><label class="toggle"><input type="checkbox" ${g.cardio?'checked':''} onchange="toggleGroupProp('cardio',this.checked)"><span class="toggle-slider"></span></label><span style="font-size:14px;font-weight:500">Include cardio</span></div></div>
+  <div class="sec-label">Color</div><div class="modal-form"><div class="color-picker">${COLORS.map(c=>`<div class="color-swatch${g.color===c?' selected':''}" style="background:${c}" onclick="setGroupColor('${c}')"></div>`).join('')}</div></div><div style="height:120px"></div>
+  <div class="overlay-finish-bar"><button class="btn btn-ghost" onclick="discardGroupEdits()">Discard</button><button class="btn btn-primary" onclick="saveGroupEdits()">Save Changes</button></div>`;
   ov.innerHTML=html;
 }
-function toggleStar(gid, ei){ const g=getGroup(gid); if(!g) return; g.exercises[ei].starred=!g.exercises[ei].starred; saveDB(); renderEditGroup(gid); }
-function toggleGroupProp(gid, prop, val){ const g=getGroup(gid); if(!g) return; g[prop]=val; saveDB(); }
-function setGroupColor(gid, color){ const g=getGroup(gid); if(!g) return; g.color=color; saveDB(); renderEditGroup(gid); }
-function deleteGroup(gid){ confirm2('Delete this group? History kept.','Delete',()=>{ db.groups=db.groups.filter(g=>g.id!==gid); saveDB(); renderManagePlanList(); },'Cancel'); }
-function removeExerciseFromGroup(gid, ei){ const g=getGroup(gid); if(!g) return; confirm2(`Remove "${g.exercises[ei].name}"?`,'Remove',()=>{ g.exercises.splice(ei,1); saveDB(); renderEditGroup(gid); },'Cancel'); }
 
-function openEditGroupMeta(gid){
-  const ov=document.getElementById('manage-overlay'); if(!ov) return;
-  const g=getGroup(gid); if(!g) return;
-  ov.innerHTML=`<div class="overlay-head"><button class="back-btn" onclick="renderEditGroup('${gid}')">←</button><div class="overlay-title">Rename</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="meta-name" value="${g.label}"></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-ghost" style="flex:1" onclick="renderEditGroup('${gid}')">Cancel</button><button class="btn btn-primary" style="flex:1" onclick="saveGroupMeta('${gid}')">Save</button></div>`;
-}
-function saveGroupMeta(gid){ const g=getGroup(gid); if(!g) return; const n=document.getElementById('meta-name')?.value.trim(); if(!n) return; g.label=n; saveDB(); renderEditGroup(gid); }
+function toggleStar(ei){ editGroupBuf.exercises[ei].starred = !editGroupBuf.exercises[ei].starred; renderEditGroup(); }
+function toggleGroupProp(prop, val){ editGroupBuf[prop] = val; }
+function setGroupColor(color){ editGroupBuf.color = color; renderEditGroup(); }
+function removeExerciseFromGroup(ei){ editGroupBuf.exercises.splice(ei,1); renderEditGroup(); }
 
-function openAddExerciseForm(gid){
-  const ov=document.getElementById('manage-overlay'); if(!ov) return;
-  ov.innerHTML=`<div class="overlay-head"><button class="back-btn" onclick="renderEditGroup('${gid}')">←</button><div class="overlay-title">Add Exercise</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="nex-name"><label class="field-lbl">Sets</label><input id="nex-sets" type="number" value="3"><label class="field-lbl">Reps</label><input id="nex-range" value="8–12"><div class="toggle-wrap" style="margin-top:16px;"><label class="toggle"><input type="checkbox" id="nex-star"><span class="toggle-slider"></span></label><span>⭐ Key exercise</span></div></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-ghost" style="flex:1" onclick="renderEditGroup('${gid}')">Cancel</button><button class="btn btn-primary" style="flex:1" onclick="confirmAddExercise('${gid}')">Add</button></div>`;
+function discardGroupEdits() {
+  editGroupBuf = null;
+  renderManagePlanList();
 }
-function confirmAddExercise(gid){ const g=getGroup(gid); if(!g) return; const n=document.getElementById('nex-name')?.value.trim(); if(!n) return; g.exercises.push({id:slug(n)+'_'+uid(),name:n,sets:parseInt(document.getElementById('nex-sets')?.value)||3,range:document.getElementById('nex-range')?.value.trim()||'8–12',starred:document.getElementById('nex-star')?.checked||false}); saveDB(); renderEditGroup(gid); }
 
-function openEditExerciseForm(gid, ei){
-  const ov=document.getElementById('manage-overlay'); if(!ov) return;
-  const g=getGroup(gid); if(!g) return; const ex=g.exercises[ei];
-  ov.innerHTML=`<div class="overlay-head"><button class="back-btn" onclick="renderEditGroup('${gid}')">←</button><div class="overlay-title">Edit Exercise</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="eex-name" value="${ex.name}"><label class="field-lbl">Sets</label><input id="eex-sets" type="number" value="${ex.sets}"><label class="field-lbl">Reps</label><input id="eex-range" value="${ex.range}"><div class="toggle-wrap" style="margin-top:16px;"><label class="toggle"><input type="checkbox" id="eex-star" ${ex.starred?'checked':''}><span class="toggle-slider"></span></label><span>⭐ Key exercise</span></div></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-ghost" style="flex:1" onclick="renderEditGroup('${gid}')">Cancel</button><button class="btn btn-primary" style="flex:1" onclick="confirmEditExercise('${gid}',${ei})">Save</button></div>`;
+function saveGroupEdits() {
+  const idx = db.groups.findIndex(g => g.id === editGroupBuf.id);
+  if(idx > -1) db.groups[idx] = editGroupBuf;
+  else db.groups.push(editGroupBuf); // In case of new group
+  saveDB();
+  editGroupBuf = null;
+  renderManagePlanList();
 }
-function confirmEditExercise(gid, ei){ const g=getGroup(gid); if(!g) return; const n=document.getElementById('eex-name')?.value.trim(); if(!n) return; g.exercises[ei]={...g.exercises[ei],name:n,sets:parseInt(document.getElementById('eex-sets')?.value)||3,range:document.getElementById('eex-range')?.value.trim()||'8–12',starred:document.getElementById('eex-star')?.checked||false}; saveDB(); renderEditGroup(gid); }
+
+function openEditGroupMeta(){
+  const ov=document.getElementById('manage-overlay'); if(!ov) return;
+  let html=`<div class="overlay-head"><button class="back-btn" onclick="renderEditGroup()">←</button><div class="overlay-title">Rename</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="meta-name" value="${editGroupBuf.label}"></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-primary" style="width:100%" onclick="saveGroupMeta()">Done</button></div>`;
+  ov.innerHTML=html; setTimeout(()=>document.getElementById('meta-name')?.focus(),100);
+}
+function saveGroupMeta(){ const n=document.getElementById('meta-name')?.value.trim(); if(n) editGroupBuf.label=n; renderEditGroup(); }
+
+function openAddExerciseForm(){
+  const ov=document.getElementById('manage-overlay'); if(!ov) return;
+  ov.innerHTML=`<div class="overlay-head"><button class="back-btn" onclick="renderEditGroup()">←</button><div class="overlay-title">Add Exercise</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="nex-name"><label class="field-lbl">Sets</label><input id="nex-sets" type="number" value="3"><label class="field-lbl">Reps</label><input id="nex-range" value="8–12"><div class="toggle-wrap" style="margin-top:16px;"><label class="toggle"><input type="checkbox" id="nex-star"><span class="toggle-slider"></span></label><span>⭐ Key exercise</span></div></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-primary" style="width:100%" onclick="confirmAddExercise()">Add</button></div>`;
+  setTimeout(()=>document.getElementById('nex-name')?.focus(),100);
+}
+function confirmAddExercise(){ const n=document.getElementById('nex-name')?.value.trim(); if(!n) return; editGroupBuf.exercises.push({id:slug(n)+'_'+uid(),name:n,sets:parseInt(document.getElementById('nex-sets')?.value)||3,range:document.getElementById('nex-range')?.value.trim()||'8–12',starred:document.getElementById('nex-star')?.checked||false}); renderEditGroup(); }
+
+function openEditExerciseForm(ei){
+  const ov=document.getElementById('manage-overlay'); if(!ov) return; const ex=editGroupBuf.exercises[ei];
+  ov.innerHTML=`<div class="overlay-head"><button class="back-btn" onclick="renderEditGroup()">←</button><div class="overlay-title">Edit Exercise</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="eex-name" value="${ex.name}"><label class="field-lbl">Sets</label><input id="eex-sets" type="number" value="${ex.sets}"><label class="field-lbl">Reps</label><input id="eex-range" value="${ex.range}"><div class="toggle-wrap" style="margin-top:16px;"><label class="toggle"><input type="checkbox" id="eex-star" ${ex.starred?'checked':''}><span class="toggle-slider"></span></label><span>⭐ Key exercise</span></div></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-primary" style="width:100%" onclick="confirmEditExercise(${ei})">Done</button></div>`;
+  setTimeout(()=>document.getElementById('eex-name')?.focus(),100);
+}
+function confirmEditExercise(ei){ const n=document.getElementById('eex-name')?.value.trim(); if(!n) return; editGroupBuf.exercises[ei]={...editGroupBuf.exercises[ei],name:n,sets:parseInt(document.getElementById('eex-sets')?.value)||3,range:document.getElementById('eex-range')?.value.trim()||'8–12',starred:document.getElementById('eex-star')?.checked||false}; renderEditGroup(); }
 
 function openNewGroupForm(){
   const ov=document.getElementById('manage-overlay'); if(!ov) return;
-  ov.innerHTML=`<div class="overlay-head"><button class="back-btn" onclick="renderManagePlanList()">←</button><div class="overlay-title">New Group</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="ng-name"><label class="field-lbl">Color</label><div class="color-picker" id="ng-colors">${COLORS.map((c,i)=>`<div class="color-swatch${i===0?' selected':''}" style="background:${c}" data-color="${c}" onclick="selectNewGroupColor(this)"></div>`).join('')}</div><div class="toggle-wrap" style="margin-top:16px;"><label class="toggle"><input type="checkbox" id="ng-cardio" checked><span class="toggle-slider"></span></label><span>Include cardio</span></div><div class="toggle-wrap" style="margin-top:12px"><label class="toggle"><input type="checkbox" id="ng-cardio-opt"><span class="toggle-slider"></span></label><span>Cardio optional</span></div></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-ghost" style="flex:1" onclick="renderManagePlanList()">Cancel</button><button class="btn btn-primary" style="flex:1" onclick="confirmNewGroup()">Create</button></div>`;
+  ov.innerHTML=`<div class="overlay-head"><button class="back-btn" onclick="renderManagePlanList()">←</button><div class="overlay-title">New Group</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="ng-name" placeholder="e.g. Pull Day"><label class="field-lbl">Color</label><div class="color-picker" id="ng-colors">${COLORS.map((c,i)=>`<div class="color-swatch${i===0?' selected':''}" style="background:${c}" data-color="${c}" onclick="selectNewGroupColor(this)"></div>`).join('')}</div><div class="toggle-wrap" style="margin-top:16px;"><label class="toggle"><input type="checkbox" id="ng-cardio" checked><span class="toggle-slider"></span></label><span>Include cardio</span></div></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-primary" style="width:100%" onclick="confirmNewGroup()">Next</button></div>`;
+  setTimeout(()=>document.getElementById('ng-name')?.focus(),100);
 }
 function selectNewGroupColor(el){ document.querySelectorAll('#ng-colors .color-swatch').forEach(s=>s.classList.remove('selected')); el.classList.add('selected'); }
-function confirmNewGroup(){ const n=document.getElementById('ng-name')?.value.trim(); if(!n) return; const c=document.querySelector('#ng-colors .color-swatch.selected')?.dataset.color||COLORS[0]; const id='grp_'+uid(); db.groups.push({id,label:n,color:c,cardio:document.getElementById('ng-cardio')?.checked,cardioOpt:document.getElementById('ng-cardio-opt')?.checked,exercises:[]}); saveDB(); openEditGroup(id); }
+function confirmNewGroup(){ const n=document.getElementById('ng-name')?.value.trim(); if(!n){alert('Enter a group name');return;} const c=document.querySelector('#ng-colors .color-swatch.selected')?.dataset.color||COLORS[0]; const id='grp_'+uid(); editGroupBuf = {id,label:n,color:c,cardio:document.getElementById('ng-cardio')?.checked,exercises:[]}; renderEditGroup(); }
 
+// ══════════════════════════════════════════
+// ACTIVE WORKOUT
+// ══════════════════════════════════════════
 function startWorkout(gid){
   const g=getGroup(gid); if(!g) return;
   openExSet=new Set([0]);
@@ -301,7 +357,7 @@ function startWorkout(gid){
   renderWorkoutScreen(); showScreen('workout'); document.getElementById('nav-workout').style.display='flex';
 }
 function renderWorkoutScreen(){
-  if(!activeWk) return; const g=getGroup(activeWk.groupId)||{label:'Workout',color:'#888',cardio:false,cardioOpt:false};
+  if(!activeWk) return; const g=getGroup(activeWk.groupId)||{label:'Workout',color:'#888',cardio:false};
   document.getElementById('wk-dot').style.background=g.color; document.getElementById('wk-title').textContent=g.label; document.getElementById('wk-date').textContent=fmtDateFull(activeWk.ts);
   const el=document.getElementById('ex-list'); el.innerHTML='';
   activeWk.exercises.forEach((sEx,ei)=>{
@@ -319,18 +375,18 @@ function toggleEx(ei){ if(openExSet.has(ei)) openExSet.delete(ei); else openExSe
 function updSet(ei,si,field,val){ if(activeWk) activeWk.exercises[ei].sets[si][field]=val; }
 function renderCardioSection(){
   const cs=document.getElementById('cardio-sec'); cs.innerHTML=''; const g=getGroup(activeWk.groupId)||{cardio:false}; if(!g.cardio) return;
-  cs.innerHTML=`<div class="sec-label" style="padding-top:12px">${g.cardioOpt?'Optional ':''}Cardio</div><div class="cardio-block"><div class="cardio-title">Incline Walk · 3.6 mph · ${g.cardioOpt?'15–20':'20–25'} min</div><div class="cardio-row"><div class="cardio-field"><label>Duration</label><input class="set-input" type="number" id="c-dur" oninput="updCardio()"></div><div class="cardio-field"><label>Speed</label><input class="set-input" type="number" id="c-spd" value="3.6" oninput="updCardio()"></div><div class="cardio-field"><label>Incline %</label><input class="set-input" type="number" id="c-inc" oninput="updCardio()"></div></div></div>`;
+  cs.innerHTML=`<div class="sec-label" style="padding-top:12px">Cardio</div><div class="cardio-block"><div class="cardio-title">Incline Walk · 3.6 mph · 20–25 min</div><div class="cardio-row"><div class="cardio-field"><label>Duration</label><input class="set-input" type="number" id="c-dur" oninput="updCardio()"></div><div class="cardio-field"><label>Speed</label><input class="set-input" type="number" id="c-spd" value="3.6" oninput="updCardio()"></div><div class="cardio-field"><label>Incline %</label><input class="set-input" type="number" id="c-inc" oninput="updCardio()"></div></div></div>`;
 }
 function updCardio(){ if(activeWk) activeWk.cardio={duration:document.getElementById('c-dur')?.value||'',speed:document.getElementById('c-spd')?.value||'3.6',incline:document.getElementById('c-inc')?.value||''}; }
 function toggleDone(ei,si){
   if(!activeWk) return; const set=activeWk.exercises[ei].sets[si]; set.done=!set.done;
   document.querySelector(`#sr-${ei}-${si} .set-check`)?.classList.toggle('done',set.done);
-  if(set.done){ setRestAuto((getGroup(activeWk.groupId)||{exercises:[]}).exercises.find(e=>e.id===activeWk.exercises[ei].id)?.iso||false); checkPR(activeWk.exercises[ei].id, parseFloat(set.weight)||0); }
+  if(set.done){ setRestAuto(); checkPR(activeWk.exercises[ei].id, parseFloat(set.weight)||0); }
 }
 function checkPR(id,w){ if(w>0&&w>getPR(id)) showPRToast(id); }
 function showPRToast(id){ const t=document.getElementById('pr-toast'); t.textContent='🏆 New PR — '+(allKnownExercises().find(e=>e.id===id)?.name.replace('⭐','').trim()||'Exercise')+'!'; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),3000); }
 
-function setRestAuto(isIso){ setRest(isIso?60:75); }
+function setRestAuto(){ setRest(75); }
 function setRest(s){
   clearInterval(restTimer); restEnd=Date.now()+s*1000; document.querySelectorAll('.rest-btn').forEach(b=>b.classList.remove('active')); const map={60:0,75:1,90:2}; if(map[s]!==undefined) document.querySelectorAll('.rest-btn')[map[s]]?.classList.add('active');
   restTimer=setInterval(()=>{ const rem=Math.max(0,restEnd-Date.now()); const el=document.getElementById('rest-val'); if(el) el.textContent=rem>0?Math.ceil(rem/1000)+'s':'Go! 💪'; if(rem===0){ clearInterval(restTimer); setTimeout(()=>{if(document.getElementById('rest-val'))document.getElementById('rest-val').textContent='—';},2500); } },200);
@@ -364,7 +420,7 @@ function renderSessionView(idx, editMode){
   if(g.cardio){
     const c=s.cardio||{}; html+=`<div class="cardio-block"><div class="cardio-title">Cardio</div><div class="cardio-row">${editMode?`<div class="cardio-field"><label>Min</label><input class="set-input" type="number" value="${c.duration||''}" oninput="updEditCardio('duration',this.value)"></div><div class="cardio-field"><label>Spd</label><input class="set-input" type="number" value="${c.speed||''}" oninput="updEditCardio('speed',this.value)"></div><div class="cardio-field"><label>Inc</label><input class="set-input" type="number" value="${c.incline||''}" oninput="updEditCardio('incline',this.value)"></div>`:(c.duration||c.speed||c.incline?`<div style="font-size:14px;color:var(--text);display:flex;gap:16px;">${c.duration?`<span>Dur: <b style="color:var(--blue)">${c.duration}</b></span>`:''}${c.speed?`<span>Spd: <b style="color:var(--blue)">${c.speed}</b></span>`:''}${c.incline?`<span>Inc: <b style="color:var(--blue)">${c.incline}</b></span>`:''}</div>`:'<div style="font-size:13px;color:var(--muted)">No cardio logged</div>')}</div></div>`;
   }
-  html+=`<div class="px" style="margin-top:16px"><div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600">NOTES</div>${editMode?`<textarea class="notes-input" oninput="updEditNotes(this.value)">${s.notes||''}</textarea>`:`<div style="font-size:14px;background:var(--surface);border-radius:var(--radius-sm);padding:14px;border:1px solid var(--border);min-height:50px">${s.notes||'<span style="color:var(--muted2)">No notes</span>'}</div>`}</div><div style="height:120px"></div><div class="overlay-finish-bar">${editMode?`<button class="btn btn-ghost" onclick="cancelEditSession(${idx})">Discard</button><button class="btn btn-primary" onclick="saveEditSession(${idx})">Save</button>`:`<button class="btn btn-red" onclick="deleteSession(${idx})">Delete Session</button>`}</div>`;
+  html+=`<div class="px" style="margin-top:16px"><div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600">NOTES</div>${editMode?`<textarea class="notes-input" oninput="updEditNotes(this.value)">${s.notes||''}</textarea>`:`<div style="font-size:14px;background:var(--surface);border-radius:var(--radius-sm);padding:14px;border:1px solid var(--border);min-height:50px">${s.notes||'<span style="color:var(--muted2)">No notes</span>'}</div>`}</div><div style="height:120px"></div><div class="overlay-finish-bar">${editMode?`<button class="btn btn-ghost" onclick="cancelEditSession(${idx})">Discard</button><button class="btn btn-primary" onclick="saveEditSession(${idx})">Save Changes</button>`:`<button class="btn btn-red" onclick="deleteSession(${idx})">Delete Session</button>`}</div>`;
   let ov=document.getElementById('detail-overlay'); if(!ov){ ov=document.createElement('div'); ov.id='detail-overlay'; document.body.appendChild(ov); } ov.innerHTML=html;
 }
 function deleteSession(idx){ confirm2('Delete session?','Delete',()=>{ db.sessions.splice(idx,1); saveDB(); closeDetail(); renderHistory(); renderHome(); },'Cancel'); }
@@ -386,13 +442,3 @@ function renderVolumeChart(){
 }
 function saveMeasurement(){ const bw=document.getElementById('m-bw').value, waist=document.getElementById('m-waist').value, chest=document.getElementById('m-chest').value, shoulder=document.getElementById('m-shoulder').value; if(!bw&&!waist&&!chest&&!shoulder){ alert('Enter measurement'); return; } db.measurements.push({ts:Date.now(),bw,waist,chest,shoulder}); saveDB(); ['m-bw','m-waist','m-chest','m-shoulder'].forEach(id=>{if(document.getElementById(id))document.getElementById(id).value='';}); renderMeasureHistory(); }
 function renderMeasureHistory(){ const el=document.getElementById('measure-hist'); if(!el) return; const rows=[...db.measurements].sort((a,b)=>b.ts-a.ts).slice(0,10); if(!rows.length){ el.innerHTML='<div style="text-align:center;color:var(--muted);font-size:14px;padding:24px 0">No measurements yet</div>'; return; } el.innerHTML=rows.map(m=>`<div class="measure-row"><div style="font-size:13px;color:var(--muted);font-weight:500">${fmtDate(m.ts)}</div><div style="display:flex;gap:14px;font-size:14px;font-weight:600">${m.bw?`<span>${m.bw} <span style="font-weight:500;font-size:11px">lbs</span></span>`:''}${m.waist?`<span>${m.waist}<span style="font-weight:500;font-size:11px">" w</span></span>`:''}</div></div>`).join(''); }
-
-// EXPORT / IMPORT
-function exportExcel(){
-  const sRows=[]; db.sessions.forEach(s=>{ const g=getGroup(s.groupId)||{label:s.groupId||''}; const date=new Date(s.ts).toLocaleString('en-US'); (s.exercises||[]).length?(s.exercises.forEach(ex=>ex.sets.forEach((st,i)=>{ sRows.push({Timestamp:s.ts,Date:date,GroupLabel:g.label,ExerciseName:ex.name,SetNumber:i+1,Weight:st.weight||'',Reps:st.reps||'',Done:st.done?'yes':'no'}); }))):sRows.push({Timestamp:s.ts,Date:date,GroupLabel:g.label}); });
-  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sRows),'Sessions'); XLSX.writeFile(wb,'training_backup.xlsx');
-}
-function importExcel(event){ alert("Excel imports override current cloud data. Not implemented here for safety. Contact dev to run manual script."); }
-function clearAllData(){ confirm2('Delete everything from cloud?','Delete',()=>{ db={sessions:[],measurements:[],groups:JSON.parse(JSON.stringify(DEFAULT_GROUPS))}; saveDB(); renderHome(); showScreen('home'); },'Cancel'); }
-
-// Init done inside onAuthStateChanged

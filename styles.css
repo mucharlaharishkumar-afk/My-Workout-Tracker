@@ -13,11 +13,22 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
 input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
 input[type=number]{-moz-appearance:textfield}
 
-/* LOGIN SCREEN */
+/* LOGIN SCREEN & MODALS */
 #login-screen {
   position: fixed; inset: 0; background: var(--bg); z-index: 1000;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 24px; text-align: center;
+}
+
+#weigh-in-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 1500;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.weigh-in-box {
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: var(--radius); padding: 24px; width: 100%; max-width: 340px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5); text-align: center;
 }
 
 #app{max-width:430px;margin:0 auto;min-height:100vh;position:relative}
@@ -107,45 +118,24 @@ input[type=number]{-moz-appearance:textfield}
 
 /* FLOATING ACTION BARS */
 .workout-finish-bar {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(var(--nav-h) + 16px + env(safe-area-inset-bottom));
-  width: calc(100% - 32px);
-  max-width: 400px;
-  background: rgba(28,28,30,0.95);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  display: flex;
-  gap: 10px;
-  z-index: 150;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  width: calc(100% - 32px); max-width: 400px;
+  background: rgba(28,28,30,0.95); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px; display: flex; gap: 10px; z-index: 150; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 .workout-finish-bar .btn {flex:1;min-width:0;padding:12px 16px;}
 
 .overlay-finish-bar {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(16px + env(safe-area-inset-bottom));
-  width: calc(100% - 32px);
-  max-width: 400px;
-  background: rgba(28,28,30,0.95);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  display: flex;
-  gap: 10px;
-  z-index: 500;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  width: calc(100% - 32px); max-width: 400px;
+  background: rgba(28,28,30,0.95); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px; display: flex; gap: 10px; z-index: 500; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 .overlay-finish-bar .btn {flex:1;min-width:0;padding:12px 16px;}
-
 
 /* HISTORY */
 .hist-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin:0 16px 10px;padding:16px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.2)}
