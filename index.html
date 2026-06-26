@@ -23,7 +23,16 @@
   <h1 style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">Training</h1>
   <p style="color: var(--muted); margin-bottom: 32px;">Sign in to sync your workouts</p>
   
-  <button class="btn btn-primary" onclick="signInWithGoogle()" style="width: 100%; max-width: 280px; display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px;">
+  <div id="tos-container" style="margin-bottom: 24px; text-align: left; background: var(--surface); padding: 16px; border-radius: var(--radius-sm); border: 1px solid var(--border); width: 100%; max-width: 280px;">
+    <label style="display: flex; gap: 12px; align-items: flex-start; cursor: pointer;">
+      <input type="checkbox" id="tos-checkbox" style="width: 20px; height: 20px; flex-shrink: 0; margin-top: 2px;">
+      <span style="font-size: 11px; color: var(--muted); line-height: 1.4;">
+        <b>Terms & Privacy:</b> By checking this, you agree this app is a tracking tool, not medical advice. Use at your own risk. Cloud data is stored securely.
+      </span>
+    </label>
+  </div>
+
+  <button class="btn btn-primary" onclick="signInWithGoogle()" style="width: 100%; max-width: 280px; display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px;">
     <span style="background: white; border-radius: 50%; padding: 4px; display: flex; align-items: center; justify-content: center;"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" width="16" height="16" alt="Google"></span>
     Sign in with Google
   </button>
@@ -176,11 +185,59 @@
     </div>
   </div>
 
+  <div class="screen" id="screen-shop">
+    <div class="top-bar">
+      <div><h1>Shop</h1><p>My recommended gear & supplements</p></div>
+    </div>
+    
+    <div class="px" style="margin-top: 8px;">
+      <div class="sec-label" style="padding: 0 0 10px 0;">Lifting Gear</div>
+      
+      <a href="YOUR_AMAZON_LINK_HERE" target="_blank" class="shop-card">
+        <div class="shop-icon">🧤</div>
+        <div class="shop-info">
+          <div class="shop-title">Premium Lifting Straps</div>
+          <div class="shop-desc">Save your grip on heavy pull days.</div>
+        </div>
+        <div class="shop-arrow">↗</div>
+      </a>
+      
+      <a href="YOUR_AMAZON_LINK_HERE" target="_blank" class="shop-card">
+        <div class="shop-icon">🏋️</div>
+        <div class="shop-info">
+          <div class="shop-title">Lever Weight Belt</div>
+          <div class="shop-desc">Essential core support for squats & deadlifts.</div>
+        </div>
+        <div class="shop-arrow">↗</div>
+      </a>
+
+      <div class="sec-label" style="padding: 24px 0 10px 0;">Supplements</div>
+      
+      <a href="YOUR_AMAZON_LINK_HERE" target="_blank" class="shop-card">
+        <div class="shop-icon">🥛</div>
+        <div class="shop-info">
+          <div class="shop-title">Whey Protein Isolate</div>
+          <div class="shop-desc">Clean digestion, 25g protein per scoop.</div>
+        </div>
+        <div class="shop-arrow">↗</div>
+      </a>
+
+      <div class="ad-container">
+        <div style="font-size: 10px; color: var(--muted2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Advertisement</div>
+        <div class="ad-placeholder">
+          [ Google Ad Space ]
+        </div>
+      </div>
+      <div style="height: 40px;"></div>
+    </div>
+  </div>
+
   <nav class="bottom-nav">
     <button class="nav-btn active" id="nav-home" onclick="showScreen('home')"><span class="nav-icon">🏠</span>Home</button>
     <button class="nav-btn" id="nav-workout" onclick="showScreen('workout')" style="display:none"><span class="nav-icon">🔥</span>Active</button>
     <button class="nav-btn" id="nav-history" onclick="showScreen('history')"><span class="nav-icon">📋</span>History</button>
     <button class="nav-btn" id="nav-progress" onclick="showScreen('progress')"><span class="nav-icon">📈</span>Progress</button>
+    <button class="nav-btn" id="nav-shop" onclick="showScreen('shop')"><span class="nav-icon">🛒</span>Shop</button>
   </nav>
 
 </div><div id="pr-toast">🏆 New PR!</div>

@@ -51,17 +51,28 @@ auth.onAuthStateChanged(async (user) => {
   }
 });
 
+// Function to verify the legal checkbox is checked
+function checkTOS() {
+  const checkbox = document.getElementById('tos-checkbox');
+  if (!checkbox || !checkbox.checked) {
+    alert("Please check the box to agree to the Terms & Privacy policy before continuing.");
+    return false;
+  }
+  return true;
+}
+
 function signInWithGoogle() {
+  if (!checkTOS()) return; // Stop if checkbox is empty
+  
   const provider = new firebase.auth.GoogleAuthProvider();
-  // Using Popup to bypass strict storage partitioning on Mobile Safari
-  // (Ignore the COOP console error on GitHub pages desktop, it still authenticates)
   auth.signInWithPopup(provider).catch(err => {
     alert("Login issue: " + err.message);
   });
 }
 
-// Shows the warning modal BEFORE becoming a guest
 function triggerGuestWarning() {
+  if (!checkTOS()) return; // Stop if checkbox is empty
+  
   document.getElementById('guest-warning-overlay').style.display = 'flex';
 }
 
