@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Training">
 <meta name="theme-color" content="#000000">
@@ -27,14 +28,24 @@
     Sign in with Google
   </button>
   
-  <button class="btn btn-ghost" onclick="continueAsGuest()" style="width: 100%; max-width: 280px;">
+  <button class="btn btn-ghost" onclick="triggerGuestWarning()" style="width: 100%; max-width: 280px;">
     Continue as Guest
   </button>
-  <div style="font-size: 11px; color: var(--muted2); margin-top: 12px;">Guest mode saves locally to this device only.</div>
 </div>
 
-<div id="weigh-in-overlay" style="display:none;">
-  <div class="weigh-in-box">
+<div id="guest-warning-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h2 style="font-size: 18px; margin-bottom: 8px;">Are you sure? ⚠️</h2>
+    <p style="font-size: 14px; color: var(--muted); margin-bottom: 20px;">Guest mode saves data only to this specific phone. If you clear your browser history, you <b>will lose all your progress</b>. Sign in with Google to safely back up to the cloud.</p>
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <button class="btn btn-primary" onclick="signInWithGoogle()">Sign in with Google</button>
+      <button class="btn btn-ghost" onclick="confirmGuestMode()">Continue as Guest anyway</button>
+    </div>
+  </div>
+</div>
+
+<div id="weigh-in-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
     <h2 style="font-size: 18px; margin-bottom: 8px;">Weekly Weigh-in ⚖️</h2>
     <p style="font-size: 13px; color: var(--muted); margin-bottom: 16px;">It's been a while since you logged your weight. Want to track it now?</p>
     <input type="number" inputmode="decimal" id="quick-bw" class="field-input" placeholder="Body Weight (lbs)" style="margin-bottom: 16px;">
@@ -52,7 +63,18 @@
       <div><h1>Training</h1><p id="home-sub">Choose a workout</p></div>
       <button class="icon-btn" onclick="showScreen('settings')">⚙️</button>
     </div>
-    <div class="sec-label">Start Session <span class="sec-action" onclick="openManagePlan()">Manage Plan</span></div>
+    
+    <div class="px" style="margin-bottom: 16px;">
+      <div class="wk-card" style="background:var(--surface3); display:flex; align-items:center; gap:16px;" onclick="openManagePlan()">
+        <div style="font-size:26px; background:var(--surface2); width:44px; height:44px; display:flex; align-items:center; justify-content:center; border-radius:10px;">🛠️</div>
+        <div>
+          <div style="font-size:15px; font-weight:600;">Manage Workout Plan</div>
+          <div style="font-size:12px; color:var(--muted); margin-top:2px;">Edit routines, exercises & colors</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec-label">Start Session</div>
     <div class="workout-grid" id="wk-cards"></div>
     <div class="sec-label">This Week</div>
     <div class="stats-strip" id="stats-strip"></div>
@@ -130,6 +152,14 @@
       <div class="settings-row">
         <div><div style="font-size:15px;font-weight:600">Status</div><div style="font-size:12px;color:var(--blue);margin-top:4px" id="user-email">Syncing...</div></div>
         <button class="btn btn-ghost btn-sm" onclick="signOutUser()">Sign Out</button>
+      </div>
+    </div>
+
+    <div class="sec-label">Preferences</div>
+    <div class="settings-block">
+      <div class="settings-row">
+        <div><div style="font-size:15px;font-weight:600">Weekly Goal</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Target sessions per week</div></div>
+        <input type="number" id="set-goal" class="field-input" style="width: 70px; text-align: center; padding: 6px;" onchange="updateWeeklyGoal(this.value)">
       </div>
     </div>
     

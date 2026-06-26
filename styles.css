@@ -1,6 +1,5 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  /* Native iOS Dark Mode Palette */
   --bg:#000000;--surface:#1C1C1E;--surface2:#2C2C2E;--surface3:#3A3A3C;
   --border:rgba(255,255,255,0.1);--border2:rgba(255,255,255,0.15);
   --text:#FFFFFF;--muted:#EBEBF599;--muted2:#EBEBF54D;
@@ -20,12 +19,12 @@ input[type=number]{-moz-appearance:textfield}
   padding: 24px; text-align: center;
 }
 
-#weigh-in-overlay {
+.modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 1500;
   display: flex; align-items: center; justify-content: center; padding: 24px;
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
-.weigh-in-box {
+.modal-box {
   background: var(--surface2); border: 1px solid var(--border2);
   border-radius: var(--radius); padding: 24px; width: 100%; max-width: 340px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.5); text-align: center;

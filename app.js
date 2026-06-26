@@ -1,4 +1,4 @@
-// ══════════ 1. FIREBASE SETUP (PASTE YOUR KEYS HERE) ══════════
+// ══════════ 1. FIREBASE SETUP ══════════
 const firebaseConfig = {
   apiKey: "AIzaSyBS0cf3J3EroYIoIILqcL0pn55rvlvFiKQ",
   authDomain: "my-workout-tracker-d6283.firebaseapp.com",
@@ -17,8 +17,13 @@ let currentUser = null;
 let isGuest = false;
 
 // ══════════ 2. AUTHENTICATION & GUEST LOGIC ══════════
+
+// Automatically check if the user was a guest within the last 24 hours
+const GUEST_STORAGE_KEY = 'trn_v4_guest';
+const GUEST_TIME_KEY = 'trn_v4_guest_time';
+
 auth.onAuthStateChanged(async (user) => {
-  if (isGuest) return; // Ignore auth state changes if manually chose Guest
+  if (isGuest) return; // Prevent loop if manually bypassed
 
   const loginScreen = document.getElementById('login-screen');
   const appContainer = document.getElementById('app');
@@ -27,32 +32,50 @@ auth.onAuthStateChanged(async (user) => {
     currentUser = user;
     loginScreen.style.display = 'none';
     appContainer.style.display = 'block';
-    
-    const emailEl = document.getElementById('user-email');
-    if (emailEl) emailEl.textContent = user.email;
+    document.getElementById('user-email').textContent = user.email;
 
     await loadDB();
     renderHome();
   } else {
-    currentUser = null;
-    loginScreen.style.display = 'flex';
-    appContainer.style.display = 'none';
+    // If no Google user, check if they are a recent guest
+    const lastGuestLogin = localStorage.getItem(GUEST_TIME_KEY);
+    if (lastGuestLogin && (Date.now() - parseInt(lastGuestLogin)) < 86400000) {
+      // It's been less than 24 hours since they clicked Guest. Auto-load guest mode.
+      confirmGuestMode();
+    } else {
+      // Show login screen
+      currentUser = null;
+      loginScreen.style.display = 'flex';
+      appContainer.style.display = 'none';
+    }
   }
 });
 
 function signInWithGoogle() {
   const provider = new firebase.auth.GoogleAuthProvider();
-  // Using Popup to bypass mobile storage-partitioning block
-  auth.signInWithPopup(provider).catch(err => alert("Login error: " + err.message));
+  // Using Popup to bypass strict storage partitioning on Mobile Safari
+  // (Ignore the COOP console error on GitHub pages desktop, it still authenticates)
+  auth.signInWithPopup(provider).catch(err => {
+    alert("Login issue: " + err.message);
+  });
 }
 
-async function continueAsGuest() {
+// Shows the warning modal BEFORE becoming a guest
+function triggerGuestWarning() {
+  document.getElementById('guest-warning-overlay').style.display = 'flex';
+}
+
+// Actually locks in guest mode
+async function confirmGuestMode() {
+  document.getElementById('guest-warning-overlay').style.display = 'none';
   isGuest = true;
+  
+  // Save a timestamp so we don't annoy them for 24 hours
+  localStorage.setItem(GUEST_TIME_KEY, Date.now().toString());
+
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
-  
-  const emailEl = document.getElementById('user-email');
-  if (emailEl) emailEl.textContent = "Guest (Local Storage Only)";
+  document.getElementById('user-email').textContent = "Guest (Local Storage Only)";
   
   await loadDB();
   renderHome();
@@ -60,7 +83,8 @@ async function continueAsGuest() {
 
 function signOutUser() {
   if (isGuest) {
-    location.reload(); // Quick reset for guests
+    localStorage.removeItem(GUEST_TIME_KEY);
+    location.reload(); 
   } else {
     auth.signOut();
   }
@@ -69,14 +93,13 @@ function signOutUser() {
 async function deleteAccount() {
   confirm2("Permanently delete your account and all data from the cloud?", "Delete Account", async () => {
     if (isGuest) {
-      localStorage.removeItem('trn_v4_guest');
+      localStorage.removeItem(GUEST_STORAGE_KEY);
+      localStorage.removeItem(GUEST_TIME_KEY);
       location.reload();
       return;
     }
     try {
-      // 1. Delete data from database
       await firestore.collection('users').doc(currentUser.uid).delete();
-      // 2. Delete user auth profile
       await currentUser.delete();
       location.reload();
     } catch(e) {
@@ -113,13 +136,13 @@ const DEFAULT_GROUPS = [
 const COLORS = ['#0A84FF','#FF453A','#30D158','#FF9F0A','#BF5AF2','#FF375F','#5E5CE6','#FFD60A','#64D2FF','#32ADE6'];
 
 // ══════════ 4. CLOUD / LOCAL DATABASE ══════════
-let db = {sessions:[], measurements:[], groups: []};
+let db = {settings: {weeklyGoal: 3, setupDone: false}, sessions:[], measurements:[], groups: []};
 
 async function loadDB(){
   if (isGuest) {
-    const s = localStorage.getItem('trn_v4_guest');
+    const s = localStorage.getItem(GUEST_STORAGE_KEY);
     if (s) { db = JSON.parse(s); }
-    else { db = { sessions: [], measurements: [], groups: JSON.parse(JSON.stringify(DEFAULT_GROUPS)) }; }
+    else { db = { settings: {weeklyGoal: 3}, sessions: [], measurements: [], groups: JSON.parse(JSON.stringify(DEFAULT_GROUPS)) }; }
   } else if (currentUser) {
     try {
       const docRef = firestore.collection('users').doc(currentUser.uid);
@@ -127,7 +150,7 @@ async function loadDB(){
       if (docSnap.exists) {
         db = docSnap.data();
       } else {
-        db = { sessions: [], measurements: [], groups: JSON.parse(JSON.stringify(DEFAULT_GROUPS)) };
+        db = { settings: {weeklyGoal: 3}, sessions: [], measurements: [], groups: JSON.parse(JSON.stringify(DEFAULT_GROUPS)) };
         await saveDB();
       }
     } catch(e) {
@@ -136,29 +159,44 @@ async function loadDB(){
     }
   }
 
-  // Safety checks
+  // Safety checks for backward compatibility
+  if(!db.settings) db.settings = {weeklyGoal: 3}; 
+  if(!db.settings.weeklyGoal) db.settings.weeklyGoal = 3;
   if(!db.groups || db.groups.length === 0) db.groups = JSON.parse(JSON.stringify(DEFAULT_GROUPS));
   if(!db.measurements) db.measurements = [];
   if(!db.sessions) db.sessions = [];
   db.groups.forEach(g => g.exercises.forEach(e => { if(e.starred===undefined) e.starred=false; }));
   
+  // Set Settings UI
+  if(document.getElementById('set-goal')) {
+    document.getElementById('set-goal').value = db.settings.weeklyGoal;
+  }
+
+  // Run Startup Checks (Just weigh-in now, no onboarding)
   checkWeighIn();
 }
 
 async function saveDB(){
   if (isGuest) {
-    localStorage.setItem('trn_v4_guest', JSON.stringify(db));
+    localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(db));
   } else if (currentUser) {
     try {
       await firestore.collection('users').doc(currentUser.uid).set(db);
     } catch(e) {
       console.error("Failed to save data", e);
-      alert("Could not save to cloud. Check your connection.");
     }
   }
 }
 
-// ══════════ 5. WEEKLY WEIGH-IN LOGIC ══════════
+// ══════════ 5. ONBOARDING & WEIGH-IN LOGIC ══════════
+
+
+function updateWeeklyGoal(val) {
+  db.settings.weeklyGoal = parseInt(val) || 3;
+  saveDB();
+  renderHome();
+}
+
 function checkWeighIn() {
   const overlay = document.getElementById('weigh-in-overlay');
   if (!db.measurements || db.measurements.length === 0) {
@@ -182,7 +220,6 @@ function submitWeighIn() {
   db.measurements.push({ ts: Date.now(), bw: bw, waist: '', chest: '', shoulder: '' });
   saveDB();
   document.getElementById('weigh-in-overlay').style.display = 'none';
-  // Refresh UI if we're on the progress screen
   if(document.getElementById('screen-progress').classList.contains('active')) renderMeasureHistory();
 }
 
@@ -258,7 +295,11 @@ function renderHome(){
     card.innerHTML=`<div class="wk-card-dot" style="background:${g.color}"></div><div class="wk-card-title">${g.label}</div><div class="wk-card-sub">${g.exercises.length?g.exercises.length+' exercises':'Cardio only'}${g.cardio?' + cardio':''}</div><div class="wk-card-last">${last?'Last: '+fmtDate(last.ts):'No sessions yet'}</div>`;
     card.onclick=()=>startWorkout(g.id); cards.appendChild(card);
   });
-  const tw=thisWeekCount(), streak=calcStreak(); document.getElementById('home-sub').textContent = tw>=3 ? `${tw}/3 sessions this week ✓` : `${tw}/3 sessions this week`;
+  
+  const goal = db.settings.weeklyGoal || 3;
+  const tw=thisWeekCount(), streak=calcStreak(); 
+  document.getElementById('home-sub').textContent = tw>=goal ? `${tw}/${goal} sessions this week ✓` : `${tw}/${goal} sessions this week`;
+  
   const vol=db.sessions.filter(s=>Date.now()-s.ts<7*86400000).reduce((a,s)=>a+sessionVol(s),0);
   document.getElementById('stats-strip').innerHTML=`<div class="stat-tile"><div class="stat-tile-val">${tw}</div><div class="stat-tile-lbl">This week</div></div><div class="stat-tile"><div class="stat-tile-val">${streak}</div><div class="stat-tile-lbl">Day streak</div></div><div class="stat-tile"><div class="stat-tile-val">${vol>0?Math.round(vol/1000)+'k':'—'}</div><div class="stat-tile-lbl">Weekly vol</div></div>`;
 }
@@ -294,7 +335,11 @@ function renderEditGroup(){
   }
   html+=`<div class="sec-label" style="margin-top:12px">Cardio</div><div class="modal-form"><div class="toggle-wrap" style="margin-bottom:8px"><label class="toggle"><input type="checkbox" ${g.cardio?'checked':''} onchange="toggleGroupProp('cardio',this.checked)"><span class="toggle-slider"></span></label><span style="font-size:14px;font-weight:500">Include cardio</span></div></div>
   <div class="sec-label">Color</div><div class="modal-form"><div class="color-picker">${COLORS.map(c=>`<div class="color-swatch${g.color===c?' selected':''}" style="background:${c}" onclick="setGroupColor('${c}')"></div>`).join('')}</div></div><div style="height:120px"></div>
-  <div class="overlay-finish-bar"><button class="btn btn-ghost" onclick="discardGroupEdits()">Discard</button><button class="btn btn-primary" onclick="saveGroupEdits()">Save Changes</button></div>`;
+  <div class="overlay-finish-bar">
+    <button class="btn btn-red" onclick="deleteGroup('${g.id}')">Delete</button>
+    <button class="btn btn-ghost" onclick="discardGroupEdits()">Discard</button>
+    <button class="btn btn-primary" onclick="saveGroupEdits()">Save</button>
+  </div>`;
   ov.innerHTML=html;
 }
 
@@ -303,18 +348,13 @@ function toggleGroupProp(prop, val){ editGroupBuf[prop] = val; }
 function setGroupColor(color){ editGroupBuf.color = color; renderEditGroup(); }
 function removeExerciseFromGroup(ei){ editGroupBuf.exercises.splice(ei,1); renderEditGroup(); }
 
-function discardGroupEdits() {
-  editGroupBuf = null;
-  renderManagePlanList();
-}
+function discardGroupEdits() { editGroupBuf = null; renderManagePlanList(); }
 
 function saveGroupEdits() {
   const idx = db.groups.findIndex(g => g.id === editGroupBuf.id);
   if(idx > -1) db.groups[idx] = editGroupBuf;
-  else db.groups.push(editGroupBuf); // In case of new group
-  saveDB();
-  editGroupBuf = null;
-  renderManagePlanList();
+  else db.groups.push(editGroupBuf); 
+  saveDB(); editGroupBuf = null; renderManagePlanList();
 }
 
 function openEditGroupMeta(){
@@ -338,6 +378,15 @@ function openEditExerciseForm(ei){
 }
 function confirmEditExercise(ei){ const n=document.getElementById('eex-name')?.value.trim(); if(!n) return; editGroupBuf.exercises[ei]={...editGroupBuf.exercises[ei],name:n,sets:parseInt(document.getElementById('eex-sets')?.value)||3,range:document.getElementById('eex-range')?.value.trim()||'8–12',starred:document.getElementById('eex-star')?.checked||false}; renderEditGroup(); }
 
+function deleteGroup(gid){ 
+  confirm2('Delete this group? History kept.','Delete',() => { 
+    db.groups = db.groups.filter(g => g.id !== gid); 
+    saveDB(); 
+    editGroupBuf = null;
+    renderManagePlanList(); 
+  },'Cancel'); 
+}
+
 function openNewGroupForm(){
   const ov=document.getElementById('manage-overlay'); if(!ov) return;
   ov.innerHTML=`<div class="overlay-head"><button class="back-btn" onclick="renderManagePlanList()">←</button><div class="overlay-title">New Group</div><div></div></div><div class="modal-form" style="margin-top:8px"><label class="field-lbl">Name</label><input id="ng-name" placeholder="e.g. Pull Day"><label class="field-lbl">Color</label><div class="color-picker" id="ng-colors">${COLORS.map((c,i)=>`<div class="color-swatch${i===0?' selected':''}" style="background:${c}" data-color="${c}" onclick="selectNewGroupColor(this)"></div>`).join('')}</div><div class="toggle-wrap" style="margin-top:16px;"><label class="toggle"><input type="checkbox" id="ng-cardio" checked><span class="toggle-slider"></span></label><span>Include cardio</span></div></div><div style="height:120px"></div><div class="overlay-finish-bar"><button class="btn btn-primary" style="width:100%" onclick="confirmNewGroup()">Next</button></div>`;
@@ -350,8 +399,7 @@ function confirmNewGroup(){ const n=document.getElementById('ng-name')?.value.tr
 // ACTIVE WORKOUT
 // ══════════════════════════════════════════
 function startWorkout(gid){
-  const g=getGroup(gid); if(!g) return;
-  openExSet=new Set([0]);
+  const g=getGroup(gid); if(!g) return; openExSet=new Set([0]);
   activeWk={ groupId:gid, ts:Date.now(), duration:0, exercises: g.exercises.map(ex=>({id:ex.id,name:ex.name+(ex.starred?' ⭐':''),sets:Array.from({length:ex.sets},()=>({weight:'',reps:'',done:false}))})), cardio:null, notes:'' };
   wkStartTime=Date.now(); wkTimerInterval=setInterval(()=>{ const el=document.getElementById('wk-timer-display'); if(el) el.textContent=fmtDur(Date.now()-wkStartTime); },1000);
   renderWorkoutScreen(); showScreen('workout'); document.getElementById('nav-workout').style.display='flex';
