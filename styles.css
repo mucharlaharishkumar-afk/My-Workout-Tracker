@@ -177,7 +177,7 @@ input[type=number]{-moz-appearance:textfield}
 .measure-row:last-child{border-bottom:none;padding-bottom:0}
 
 /* OVERLAYS */
-#detail-overlay,#manage-overlay{position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:var(--bg);z-index:400;overflow-y:auto;-webkit-overflow-scrolling:touch}
+#detail-overlay,#manage-overlay{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:430px;background:var(--bg);z-index:400;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .overlay-head{padding:52px 16px 0;display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
 .overlay-title{font-size:22px;font-weight:700;letter-spacing:-0.4px}
 .back-btn{width:36px;height:36px;border-radius:50%;background:var(--surface2);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;flex-shrink:0}

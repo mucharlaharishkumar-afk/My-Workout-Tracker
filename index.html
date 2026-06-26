@@ -166,7 +166,11 @@
     <div class="sec-label" style="color:var(--red)">Danger Zone</div>
     <div class="settings-block">
       <div class="settings-row">
-        <div><div style="font-size:15px;font-weight:600">Delete Account</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Permanently wipe all data</div></div>
+        <div><div style="font-size:15px;font-weight:600">Clear All Data</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Reset workouts, keep account</div></div>
+        <button class="btn btn-red btn-sm" onclick="clearAllData()">Clear</button>
+      </div>
+      <div class="settings-row">
+        <div><div style="font-size:15px;font-weight:600">Delete Account</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Permanently wipe everything</div></div>
         <button class="btn btn-red btn-sm" onclick="deleteAccount()">Delete</button>
       </div>
     </div>

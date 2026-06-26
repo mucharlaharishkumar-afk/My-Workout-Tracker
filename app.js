@@ -108,6 +108,17 @@ async function deleteAccount() {
   }, "Cancel");
 }
 
+function clearAllData() {
+  confirm2("Delete all your workout history and reset groups to default? Your account will stay active.", "Clear Data", () => {
+    db.sessions = [];
+    db.measurements = [];
+    db.groups = JSON.parse(JSON.stringify(DEFAULT_GROUPS));
+    saveDB();
+    renderHome();
+    showScreen('home');
+  }, "Cancel");
+}
+
 // ══════════ 3. DEFAULT PLAN ══════════
 const DEFAULT_GROUPS = [
   {id:'A',label:'Upper A — Width',color:'#0A84FF',cardio:true,exercises:[
